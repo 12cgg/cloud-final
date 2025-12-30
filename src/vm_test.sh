@@ -162,10 +162,24 @@ fi
 
 # ============================================================================
 # 【启动时间测量】
-# 测量从执行nginx命令到服务完全就绪的时间
-# 与Docker的docker start对等（不含容器创建时间）
+# 测量包含：1. 虚拟机系统引导时间 (Boot Time) + 2. Nginx 服务就绪时间
+# 与 Docker 对比时，VM 的总启动时间应包含 OS 引导开销
 # ============================================================================
-log "启动Nginx..."
+log "获取虚拟机系统引导时间..."
+BOOT_TIME=0
+if command -v systemd-analyze >/dev/null 2>&1; then
+    # 提取总启动时间（例如：Startup finished in 2.123s (kernel) + 15.432s (userspace) = 17.555s）
+    BOOT_TIME=$(systemd-analyze | grep -oP "finished in .* = \K[0-9.]+(?=s)" || echo 0)
+    if [[ "${BOOT_TIME}" == "0" ]]; then
+        # 兼容不同版本的 systemd-analyze 输出格式
+        BOOT_TIME=$(systemd-analyze | awk -F'=' '/Startup finished/ {print $2}' | awk '{print $1}' | sed 's/s//' || echo 0)
+    fi
+    log "系统引导时间: ${BOOT_TIME}秒"
+else
+    log_warning "未找到 systemd-analyze，无法获取准确的系统引导时间"
+fi
+
+log "启动Nginx服务并测量就绪时间..."
 START_TIME=$(date +%s.%N)
 
 # 启动nginx
@@ -201,11 +215,15 @@ fi
 END_TIME=$(date +%s.%N)
 STARTUP_TIME=$(python3 <<PY
 from decimal import Decimal
-print(float(Decimal("${END_TIME}") - Decimal("${START_TIME}")))
+nginx_ready_time = Decimal("${END_TIME}") - Decimal("${START_TIME}")
+boot_time = Decimal("${BOOT_TIME}")
+# 总启动时间 = 系统引导时间 + 应用就绪时间
+total_time = boot_time + nginx_ready_time
+print(float(total_time.quantize(Decimal("0.001"))))
 PY
 )
 
-log_success "Nginx已启动 (${STARTUP_TIME}秒)"
+log_success "Nginx服务已就绪 (应用启动: $(python3 -c "print(round(${END_TIME}-${START_TIME}, 3))")秒, 总计: ${STARTUP_TIME}秒)"
 
 # ============================================================================
 # 【性能指标采集】
@@ -343,6 +361,11 @@ disk_mb,${DISK_MB}
 vm_ip,${VM_IP}
 EOF
 
+# 为 analyze_results.py 生成额外的结果文件，确保分析脚本能正确读取
+echo "${STARTUP_TIME}" > "${OUTPUT_DIR}/startup_time.txt"
+echo "${MEMORY_MB}" > "${OUTPUT_DIR}/used_memory_mb.txt"
+echo "${DISK_KB}" | awk '{print $1 * 1024}' > "${OUTPUT_DIR}/disk_actual_bytes.txt"
+nproc > "${OUTPUT_DIR}/configured_cpu.txt"
 echo "${VM_IP}" > "${OUTPUT_DIR}/vm_ip.txt"
 
 [[ -n "${PERF_CSV}" ]] && echo "vm,${STARTUP_TIME},${CPU_PERCENT},${MEMORY_MB},${DISK_MB}" >> "${PERF_CSV}"

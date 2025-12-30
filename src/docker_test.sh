@@ -247,6 +247,12 @@ disk_mb,${DISK_MB}
 container_ip,${CONTAINER_IP:-unavailable}
 EOF
 
+# 为 analyze_results.py 生成额外的结果文件，确保分析脚本能正确读取
+echo "${STARTUP_TIME}" > "${OUTPUT_DIR}/startup_time.txt"
+echo "${MEMORY_MB}" > "${OUTPUT_DIR}/memory_used_mb.txt"
+echo "${IMAGE_BYTES}" > "${OUTPUT_DIR}/total_disk_bytes.txt"
+echo "${CPU_PERCENT}" > "${OUTPUT_DIR}/cpu_percent.txt"
+
 [[ -n "${PERF_CSV}" ]] && echo "docker,${STARTUP_TIME},${CPU_PERCENT},${MEMORY_MB},${DISK_MB}" >> "${PERF_CSV}"
 
 echo ""
