@@ -324,7 +324,7 @@ fi
 # 修复：过滤掉 ldd 中不是绝对路径的条目（如 linux-vdso、地址等），避免算出来过小
 NGINX_LIBS_KB=$(
     ldd /usr/sbin/nginx 2>/dev/null \
-    | awk '{for (i=1;i<=NF;i++) if ($i ~ /^\\//) print $i}' \
+    | awk '{for (i=1;i<=NF;i++) if ($i ~ /^\//) print $i}' \
     | sort -u \
     | xargs -r -I{} du -sk {} 2>/dev/null \
     | awk '{sum+=$1} END {print sum+0}'
