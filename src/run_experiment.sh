@@ -188,7 +188,7 @@ run_stress_test() {
     [[ -f "${RESULT_DIR}/vm/vm_ip.txt" ]] && vm_ip=$(cat "${RESULT_DIR}/vm/vm_ip.txt")
     
     local vm_url="http://${vm_ip}:${APP_PORT}"
-    local docker_url="http://localhost:${APP_PORT}"
+    local docker_url="http://localhost:80"
     
     log "压测目标: VM=${vm_url}, Docker=${docker_url}"
     

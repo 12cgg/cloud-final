@@ -7,7 +7,8 @@
 # 输出：metrics.csv 和 performance.csv
 #
 # 使用方法:
-#   bash docker_test.sh --container-name docker-nginx --app-port 8080
+#   bash docker_test.sh --container-name docker-nginx
+#   注意：主机网络模式下，容器直接使用80端口（不再需要端口映射）
 # =============================================================================
 
 set -euo pipefail
@@ -59,13 +60,14 @@ validate_docker() {
 }
 
 validate_port() {
-    # 仅检查 127.0.0.1:APP_PORT 是否被占用（允许 VM_IP:APP_PORT 由 VM nginx 使用）
-    if ss -H -ltn 2>/dev/null | awk '{print $4}' | grep -q "^127\\.0\\.0\\.1:${APP_PORT}$"; then
-        log_error "端口 127.0.0.1:${APP_PORT} 已被占用"
+    # 主机网络模式下，Docker将直接使用宿主机的80端口
+    # 检查 0.0.0.0:80 或任何接口的 :80 是否被占用
+    if ss -H -ltn 2>/dev/null | awk '{print $4}' | grep -q ":80$"; then
+        log_error "端口 80 已被占用（主机网络模式需要）"
         exit 1
     fi
-    if netstat -tuln 2>/dev/null | awk '{print $4}' | grep -q "^127\\.0\\.0\\.1:${APP_PORT}$"; then
-        log_error "端口 127.0.0.1:${APP_PORT} 已被占用"
+    if netstat -tuln 2>/dev/null | awk '{print $4}' | grep -q ":80$"; then
+        log_error "端口 80 已被占用（主机网络模式需要）"
         exit 1
     fi
 }
@@ -107,8 +109,8 @@ docker pull "${IMAGE}" >/dev/null 2>&1 || {
 # docker start 相当于VM的nginx启动（服务启动阶段）
 # ============================================================================
 log "创建容器（预准备阶段，不计入启动时间）..."
-# 仅绑定到 127.0.0.1，避免与 VM 在同一端口冲突（VM 仅监听 VM_IP:APP_PORT）
-docker create --name "${CONTAINER_NAME}" -p "127.0.0.1:${APP_PORT}:80" "${IMAGE}" >/dev/null || {
+# 使用主机网络模式（--network host），消除Docker网络转发损耗
+docker create --name "${CONTAINER_NAME}" --network host "${IMAGE}" >/dev/null || {
     log_error "创建容器失败"
     write_placeholder
 }
@@ -134,7 +136,7 @@ success_count=0
 
 # 等待容器就绪并进行健康检查（连续3次HTTP 200，与VM完全一致）
 for i in {1..30}; do
-    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${APP_PORT}" 2>/dev/null | grep -q "200"; then
+    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:80" 2>/dev/null | grep -q "200"; then
         success_count=$((success_count + 1))
         if [[ $success_count -ge 3 ]]; then
             ready=true
@@ -196,7 +198,7 @@ T0=$(date +%s.%N)
 LOAD_END=$((SECONDS + 2))
 while [[ ${SECONDS} -lt ${LOAD_END} ]]; do
     for j in {1..25}; do
-        curl -s -o /dev/null "http://localhost:${APP_PORT}/" &
+        curl -s -o /dev/null "http://localhost:80/" &
     done
     wait
 done

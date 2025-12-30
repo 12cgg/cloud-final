@@ -6,13 +6,13 @@
 # 输出：stress.csv (格式: platform,qps,avg_latency_ms,failed,transfer_kbps)
 #
 # 使用方法:
-#   bash stress_test.sh --vm-url http://VM_IP:8080 --docker-url http://localhost:8080
+#   bash stress_test.sh --vm-url http://VM_IP:8080 --docker-url http://localhost:80
 # =============================================================================
 
 set -euo pipefail
 
 VM_URL="http://localhost:8080"
-DOCKER_URL="http://localhost:8080"
+DOCKER_URL="http://localhost:80"
 TOTAL_REQUESTS=2000
 CONCURRENCY=50
 OUTPUT_DIR="./results"
