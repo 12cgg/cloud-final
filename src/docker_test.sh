@@ -83,6 +83,10 @@ mkdir -p "${OUTPUT_DIR}"
 validate_docker
 validate_port
 
+# 冷启动对等：清理文件缓存
+sync
+sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null || true
+
 log "清理旧容器..."
 docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$" && \
     docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
@@ -93,12 +97,19 @@ docker pull "${IMAGE}" >/dev/null 2>&1 || {
     write_placeholder
 }
 
+# 预创建容器，启动计时只针对start阶段，与VM服务启动对等
+log "创建容器（不计时）..."
+docker create --name "${CONTAINER_NAME}" -p "${APP_PORT}:80" "${IMAGE}" >/dev/null || {
+    log_error "创建容器失败"
+    write_placeholder
+}
+
 log "启动容器并测量启动时间..."
 # 记录启动前的时间
 START_TIME=$(date +%s.%N)
 
 # 启动Docker容器
-docker run -d --name "${CONTAINER_NAME}" -p "${APP_PORT}:80" "${IMAGE}" >/dev/null
+docker start "${CONTAINER_NAME}" >/dev/null
 
 CONTAINER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${CONTAINER_NAME}" 2>/dev/null || echo "")
 
@@ -139,33 +150,41 @@ log_success "容器已启动 (${STARTUP_TIME}秒)"
 
 log "采集性能指标..."
 
-# 收集3次CPU样本取平均值，确保与VM测试方法一致
-CPU_SUM=0
-for i in {1..3}; do
-    CPU_VAL=$(docker stats --no-stream --format "{{.CPUPerc}}" "${CONTAINER_NAME}" 2>/dev/null | tr -d '%' || echo "0")
-    CPU_SUM=$(python3 -c "print(${CPU_SUM} + float('${CPU_VAL}' or 0))" 2>/dev/null || echo "0")
-    [[ $i -lt 3 ]] && sleep 1
+# 预热：发送少量请求让进程稳定
+for i in {1..20}; do
+    curl -s -o /dev/null "http://localhost:${APP_PORT}" 2>/dev/null || true
 done
-CPU_PERCENT=$(python3 -c "print(round(${CPU_SUM} / 3, 2))" 2>/dev/null || echo "0")
+sleep 1
 
-# 内存使用 (MB) - 容器实际使用的内存
-MEM_USAGE_RAW=$(docker stats --no-stream --format "{{.MemUsage}}" "${CONTAINER_NAME}" 2>/dev/null)
-MEMORY_MB=$(python3 <<PY
-import re
-raw="${MEM_USAGE_RAW}"
-used = raw.split('/')[0].strip() if '/' in raw else raw
-num = float(re.sub('[^0-9.]','', used) or 0)
-if 'GiB' in used or 'GB' in used: 
-    num *= 1024
-print(f"{num:.2f}")
-PY
-)
+# 获取容器内进程PID列表
+PIDS=$(docker top "${CONTAINER_NAME}" -eo pid 2>/dev/null | awk 'NR>1 {print $1}')
+PID_LIST=$(echo "${PIDS}" | tr '\n' ' ' | xargs)
 
-# 磁盘使用 (MB) - 只计算镜像大小（对应VM的Nginx安装大小）
+# CPU使用率 - 汇总容器内所有进程，三次采样取均值
+CPU_PERCENT="0"
+CPU_SUM=0
+if [[ -n "${PID_LIST}" ]]; then
+    for i in {1..3}; do
+        SAMPLE=$(ps -p ${PID_LIST} -o %cpu --no-headers 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
+        CPU_SUM=$(python3 -c "print(${CPU_SUM} + (${SAMPLE:-0}))" 2>/dev/null || echo "0")
+        [[ $i -lt 3 ]] && sleep 1
+    done
+    CPU_PERCENT=$(python3 -c "print(round(${CPU_SUM} / 3, 2))" 2>/dev/null || echo "0")
+fi
+
+# 内存使用 (MB) - 汇总容器内所有进程RSS
+MEMORY_MB="0"
+if [[ -n "${PID_LIST}" ]]; then
+    MEMORY_KB=$(ps -p ${PID_LIST} -o rss --no-headers 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
+    MEMORY_MB=$(python3 -c "print(round(${MEMORY_KB} / 1024, 2))" 2>/dev/null || echo "0")
+fi
+
+# 磁盘使用 (MB) - 镜像大小 + 可写层大小
 IMAGE_BYTES=$(docker image inspect "${IMAGE}" --format '{{.Size}}' 2>/dev/null || echo 0)
+CONTAINER_BYTES=$(docker container inspect --size "${CONTAINER_NAME}" --format '{{.SizeRootFs}}' 2>/dev/null || echo 0)
 DISK_MB=$(python3 <<PY
 try:
-    print(f"{float(${IMAGE_BYTES})/1024/1024:.2f}")
+    print(f"{(float(${IMAGE_BYTES}) + float(${CONTAINER_BYTES}))/1024/1024:.2f}")
 except:
     print("0")
 PY
@@ -190,3 +209,6 @@ log "  CPU占用: ${CPU_PERCENT}%"
 log "  内存占用: ${MEMORY_MB}MB"
 log "  磁盘占用: ${DISK_MB}MB"
 log "  容器IP: ${CONTAINER_IP:-unavailable}"
+
+# 清理容器，避免端口占用
+docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
