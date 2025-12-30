@@ -187,11 +187,8 @@ run_stress_test() {
     # 提升系统文件描述符限制，防止高并发下丢包
     ulimit -n 65535 >/dev/null 2>&1 || true
     
-    local vm_ip="localhost"
-    [[ -f "${RESULT_DIR}/vm/vm_ip.txt" ]] && vm_ip=$(cat "${RESULT_DIR}/vm/vm_ip.txt")
-    
-    local vm_url="http://${vm_ip}:${APP_PORT}"
-    local docker_url="http://localhost:80"
+    local vm_url="http://127.0.0.1:${APP_PORT}"
+    local docker_url="http://127.0.0.1:80"
     
     log "压测目标: VM=${vm_url}, Docker=${docker_url}"
     

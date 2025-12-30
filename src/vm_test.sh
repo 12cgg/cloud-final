@@ -156,9 +156,9 @@ http {
     keepalive_requests 10000;
     
     server {
-        # 只监听 VM 的内网 IP，避免与 Docker 在同一端口冲突
-        listen ${VM_IP}:${APP_PORT} reuseport;
-        server_name ${VM_IP};
+        # 修改：监听所有接口，确保与 Docker 模式对齐
+        listen ${APP_PORT} reuseport;
+        server_name _;
         
         location / {
             root /usr/share/nginx/html;
@@ -206,9 +206,9 @@ log "等待Nginx完全就绪..."
 ready=false
 success_count=0
 
-# 等待nginx就绪并进行健康检查（连续3次HTTP 200）
+# 等待nginx就绪并进行健康检查（使用127.0.0.1）
 for i in {1..30}; do
-    if curl -s -o /dev/null -w "%{http_code}" "http://${VM_IP}:${APP_PORT}" 2>/dev/null | grep -q "200"; then
+    if curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${APP_PORT}" 2>/dev/null | grep -q "200"; then
         success_count=$((success_count + 1))
         if [[ $success_count -ge 3 ]]; then
             ready=true
@@ -248,7 +248,7 @@ log "采集性能指标..."
 # 【关键修复】先产生负载，再采集CPU
 log "产生负载以获取真实CPU数据..."
 for i in {1..50}; do
-    curl -s -o /dev/null "http://${VM_IP}:${APP_PORT}" &
+    curl -s -o /dev/null "http://127.0.0.1:${APP_PORT}" &
 done
 wait
 sleep 0.5
@@ -285,7 +285,7 @@ T0=$(date +%s.%N)
 LOAD_END=$((SECONDS + 2))
 while [[ ${SECONDS} -lt ${LOAD_END} ]]; do
     for j in {1..25}; do
-        curl -s -o /dev/null "http://${VM_IP}:${APP_PORT}/" &
+        curl -s -o /dev/null "http://127.0.0.1:${APP_PORT}/" &
     done
     wait
 done

@@ -18,8 +18,8 @@ APP_PORT=8080
 OUTPUT_DIR="./results/docker"
 PERF_CSV=""
 # 固定 Nginx 版本（要求：1.28.1版本不变）
-# 说明：使用 alpine 变体可以更符合“容器轻量化”预期（内存更低/启动更快）。
-IMAGE="nginx:1.28.1-alpine"
+# 修改：使用基于 Debian 的镜像以匹配 VM 的 glibc 环境，提升高并发性能
+IMAGE="nginx:1.28.1"
 
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
@@ -156,14 +156,13 @@ http {
 NGINXEOF
 
 # 使用主机网络模式（--network host），消除Docker网络转发损耗
-# 添加CPU资源限制，确保与VM使用相同的CPU核心数
-# 挂载优化的Nginx配置文件
-# 使用 --privileged 以减少容器与内核交互开销
+# 移除 --cpus 硬限制，避免内核 CFS 调度带来的性能损耗
+# 显式设置 --ulimit 确保容器有足够的连接能力
 docker create \
     --name "${CONTAINER_NAME}" \
     --network host \
-    --cpus="${CPU_CORES}" \
     --privileged \
+    --ulimit nofile=65535:65535 \
     -v "${NGINX_CONF_DIR}/nginx.conf:/etc/nginx/nginx.conf:ro" \
     "${IMAGE}" >/dev/null || {
     log_error "创建容器失败"
@@ -189,9 +188,9 @@ log "等待容器完全就绪..."
 ready=false
 success_count=0
 
-# 等待容器就绪并进行健康检查（连续3次HTTP 200，与VM完全一致）
+# 等待容器就绪并进行健康检查（使用127.0.0.1避免localhost解析损耗）
 for i in {1..30}; do
-    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:80" 2>/dev/null | grep -q "200"; then
+    if curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:80" 2>/dev/null | grep -q "200"; then
         success_count=$((success_count + 1))
         if [[ $success_count -ge 3 ]]; then
             ready=true
@@ -253,7 +252,7 @@ T0=$(date +%s.%N)
 LOAD_END=$((SECONDS + 2))
 while [[ ${SECONDS} -lt ${LOAD_END} ]]; do
     for j in {1..25}; do
-        curl -s -o /dev/null "http://localhost:80/" &
+        curl -s -o /dev/null "http://127.0.0.1:80/" &
     done
     wait
 done

@@ -11,8 +11,8 @@
 
 set -euo pipefail
 
-VM_URL="http://localhost:8080"
-DOCKER_URL="http://localhost:80"
+VM_URL="http://127.0.0.1:8080"
+DOCKER_URL="http://127.0.0.1:80"
 TOTAL_REQUESTS=10000
 CONCURRENCY=1000
 OUTPUT_DIR="./results"
