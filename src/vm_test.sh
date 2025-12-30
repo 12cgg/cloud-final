@@ -107,6 +107,15 @@ log "停止可能存在的Nginx服务..."
 sudo systemctl stop nginx 2>/dev/null || true
 sudo pkill -9 nginx 2>/dev/null || true
 
+# 确保nginx完全停止，清理所有残留进程和文件
+sleep 0.5
+sudo rm -f /tmp/nginx_test_*.pid 2>/dev/null || true
+sudo rm -f /tmp/nginx_*.log 2>/dev/null || true
+
+# 清理系统缓存，确保冷启动测试
+sync
+sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null || true
+
 log "配置Nginx监听端口 ${APP_PORT}..."
 # 创建临时配置文件
 NGINX_CONF="/tmp/nginx_test_${APP_PORT}.conf"
@@ -142,21 +151,33 @@ if [[ ! -d "/usr/share/nginx/html" ]]; then
 fi
 
 log "启动Nginx..."
+# 记录启动前的时间
 START_TIME=$(date +%s.%N)
 
+# 启动nginx
 sudo nginx -c "${NGINX_CONF}" || {
     log_error "Nginx启动失败"
     write_placeholder
 }
 
-log "等待Nginx就绪..."
+log "等待Nginx完全就绪..."
 ready=false
+success_count=0
+
+# 等待nginx就绪并进行健康检查
 for i in {1..30}; do
-    if curl -s -o /dev/null "http://localhost:${APP_PORT}" 2>/dev/null; then
-        ready=true
-        break
+    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${APP_PORT}" 2>/dev/null | grep -q "200"; then
+        success_count=$((success_count + 1))
+        # 连续3次成功才认为真正就绪
+        if [[ $success_count -ge 3 ]]; then
+            ready=true
+            break
+        fi
+        sleep 0.2
+    else
+        success_count=0
+        sleep 0.5
     fi
-    sleep 1
 done
 
 if [[ "$ready" != true ]]; then
@@ -164,6 +185,7 @@ if [[ "$ready" != true ]]; then
     write_placeholder
 fi
 
+# 记录就绪时间
 END_TIME=$(date +%s.%N)
 STARTUP_TIME=$(python3 <<PY
 from decimal import Decimal

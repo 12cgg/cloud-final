@@ -94,19 +94,32 @@ docker pull "${IMAGE}" >/dev/null 2>&1 || {
 }
 
 log "启动容器并测量启动时间..."
+# 记录启动前的时间
 START_TIME=$(date +%s.%N)
+
+# 启动Docker容器
 docker run -d --name "${CONTAINER_NAME}" -p "${APP_PORT}:80" "${IMAGE}" >/dev/null
 
 CONTAINER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${CONTAINER_NAME}" 2>/dev/null || echo "")
 
-log "等待容器就绪..."
+log "等待容器完全就绪..."
 ready=false
+success_count=0
+
+# 等待容器就绪并进行健康检查（与VM测试相同的方法）
 for i in {1..30}; do
-    if curl -s -o /dev/null "http://localhost:${APP_PORT}" 2>/dev/null; then
-        ready=true
-        break
+    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${APP_PORT}" 2>/dev/null | grep -q "200"; then
+        success_count=$((success_count + 1))
+        # 连续3次成功才认为真正就绪
+        if [[ $success_count -ge 3 ]]; then
+            ready=true
+            break
+        fi
+        sleep 0.2
+    else
+        success_count=0
+        sleep 0.5
     fi
-    sleep 1
 done
 
 if [[ "$ready" != true ]]; then
@@ -114,6 +127,7 @@ if [[ "$ready" != true ]]; then
     write_placeholder
 fi
 
+# 记录就绪时间
 END_TIME=$(date +%s.%N)
 STARTUP_TIME=$(python3 <<PY
 from decimal import Decimal
