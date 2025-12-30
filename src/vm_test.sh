@@ -179,18 +179,17 @@ ready=false
 success_count=0
 
 # 等待nginx就绪并进行健康检查（连续3次HTTP 200）
-# 修复：提高探测频率，避免失败分支固定 sleep 0.3 人为拉长启动时间（Docker受影响更明显）
-for i in {1..400}; do
+for i in {1..30}; do
     if curl -s -o /dev/null -w "%{http_code}" "http://${VM_IP}:${APP_PORT}" 2>/dev/null | grep -q "200"; then
         success_count=$((success_count + 1))
         if [[ $success_count -ge 3 ]]; then
             ready=true
             break
         fi
-        sleep 0.02
+        sleep 0.1
     else
         success_count=0
-        sleep 0.02
+        sleep 0.3
     fi
 done
 
@@ -217,9 +216,9 @@ log "采集性能指标..."
 # 【关键修复】先产生负载，再采集CPU
 log "产生负载以获取真实CPU数据..."
 for i in {1..50}; do
-    curl -s -o /dev/null "http://${VM_IP}:${APP_PORT}" >/dev/null 2>&1 || true &
+    curl -s -o /dev/null "http://${VM_IP}:${APP_PORT}" &
 done
-wait || true
+wait
 sleep 0.5
 
 # ============================================================================
@@ -254,9 +253,9 @@ T0=$(date +%s.%N)
 LOAD_END=$((SECONDS + 2))
 while [[ ${SECONDS} -lt ${LOAD_END} ]]; do
     for j in {1..25}; do
-        curl -s -o /dev/null "http://${VM_IP}:${APP_PORT}/" >/dev/null 2>&1 || true &
+        curl -s -o /dev/null "http://${VM_IP}:${APP_PORT}/" &
     done
-    wait || true
+    wait
 done
 
 CPU_T1=$(get_nginx_cpu_ticks)
@@ -333,33 +332,6 @@ NGINX_LIBS_KB=$(
 DISK_KB=$((DISK_KB + NGINX_LIBS_KB))
 
 DISK_MB=$(python3 -c "print(round(${DISK_KB} / 1024, 2))" 2>/dev/null || echo "0")
-
-# ============================================================================
-# 【启动时间口径（选项2）】从“启动 VM”开始
-# VM 启动时间 = systemd 启动完成耗时（kernel+userspace） + nginx 服务启动到就绪耗时
-# 说明：脚本运行发生在 VM 启动之后，无法直接测到人工操作延迟；
-#       这里采用 systemd-analyze time 的机器可复现口径，避免人为时间进入指标。
-# ============================================================================
-BOOT_TIME_SEC=$(
-    systemd-analyze time 2>/dev/null | python3 - <<'PY'
-import re, sys
-s = sys.stdin.read()
-total = 0.0
-nums = re.findall(r'([0-9.]+)s\s*\((?:kernel|userspace)\)', s)
-if nums:
-    total = sum(float(x) for x in nums)
-else:
-    m = re.search(r'=\s*([0-9.]+)s', s)
-    if m:
-        total = float(m.group(1))
-print(total)
-PY
-)
-[[ -z "${BOOT_TIME_SEC}" ]] && BOOT_TIME_SEC="0"
-STARTUP_TIME=$(python3 - <<PY
-print(round(float("${BOOT_TIME_SEC}") + float("${STARTUP_TIME}"), 6))
-PY
-)
 
 # 保存指标
 cat > "${OUTPUT_DIR}/metrics.csv" <<EOF

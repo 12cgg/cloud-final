@@ -16,8 +16,9 @@ CONTAINER_NAME="docker-nginx"
 APP_PORT=8080
 OUTPUT_DIR="./results/docker"
 PERF_CSV=""
-# 默认镜像（最终以 run_experiment.sh 传入的 --image 为准）
-IMAGE="nginx:1.26.3-alpine"
+# 固定 Nginx 版本（要求：1.28.1版本不变）
+# 说明：使用 alpine 变体可以更符合“容器轻量化”预期（内存更低/启动更快）。
+IMAGE="nginx:1.28.1-alpine"
 
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
@@ -132,17 +133,17 @@ ready=false
 success_count=0
 
 # 等待容器就绪并进行健康检查（连续3次HTTP 200，与VM完全一致）
-for i in {1..400}; do
+for i in {1..30}; do
     if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${APP_PORT}" 2>/dev/null | grep -q "200"; then
         success_count=$((success_count + 1))
         if [[ $success_count -ge 3 ]]; then
             ready=true
             break
         fi
-        sleep 0.02
+        sleep 0.1
     else
         success_count=0
-        sleep 0.02
+        sleep 0.3
     fi
 done
 
@@ -195,9 +196,9 @@ T0=$(date +%s.%N)
 LOAD_END=$((SECONDS + 2))
 while [[ ${SECONDS} -lt ${LOAD_END} ]]; do
     for j in {1..25}; do
-        curl -s -o /dev/null "http://localhost:${APP_PORT}/" >/dev/null 2>&1 || true &
+        curl -s -o /dev/null "http://localhost:${APP_PORT}/" &
     done
-    wait || true
+    wait
 done
 
 CPU_T1=$(get_container_nginx_cpu_ticks)
