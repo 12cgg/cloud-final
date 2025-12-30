@@ -16,17 +16,17 @@ ENV/
 .venv/
 
 # 实验结果和数据
-src/results/
-results/
-*.csv
-data/
+# src/results/
+# results/
+# *.csv
+# data/
 
 # 图表输出
-*.png
-*.jpg
-*.jpeg
-*.pdf
-*.svg
+# *.png
+# *.jpg
+# *.jpeg
+# *.pdf
+# *.svg
 
 # 日志文件
 *.log
