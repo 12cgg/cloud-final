@@ -133,17 +133,17 @@ ready=false
 success_count=0
 
 # 等待容器就绪并进行健康检查（连续3次HTTP 200，与VM完全一致）
-for i in {1..30}; do
+for i in {1..400}; do
     if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${APP_PORT}" 2>/dev/null | grep -q "200"; then
         success_count=$((success_count + 1))
         if [[ $success_count -ge 3 ]]; then
             ready=true
             break
         fi
-        sleep 0.1
+        sleep 0.02
     else
         success_count=0
-        sleep 0.3
+        sleep 0.02
     fi
 done
 

@@ -179,17 +179,18 @@ ready=false
 success_count=0
 
 # 等待nginx就绪并进行健康检查（连续3次HTTP 200）
-for i in {1..30}; do
+# 修复：提高探测频率，避免失败分支固定 sleep 0.3 人为拉长启动时间（Docker受影响更明显）
+for i in {1..400}; do
     if curl -s -o /dev/null -w "%{http_code}" "http://${VM_IP}:${APP_PORT}" 2>/dev/null | grep -q "200"; then
         success_count=$((success_count + 1))
         if [[ $success_count -ge 3 ]]; then
             ready=true
             break
         fi
-        sleep 0.1
+        sleep 0.02
     else
         success_count=0
-        sleep 0.3
+        sleep 0.02
     fi
 done
 
