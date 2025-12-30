@@ -11,398 +11,128 @@
 
 set -e
 
-# 颜色定义
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="${SCRIPT_DIR}/venv"
 
-log_info() {
-    echo -e "${BLUE}[安装]${NC} $1"
-}
+readonly GREEN='\033[0;32m'
+readonly BLUE='\033[0;34m'
+readonly YELLOW='\033[1;33m'
+readonly RED='\033[0;31m'
+readonly NC='\033[0m'
 
-log_success() {
-    echo -e "${GREEN}[成功]${NC} $1"
-}
+log() { echo -e "${BLUE}[安装]${NC} $1"; }
+log_success() { echo -e "${GREEN}[✓]${NC} $1"; }
+log_warning() { echo -e "${YELLOW}[!]${NC} $1"; }
+log_error() { echo -e "${RED}[✗]${NC} $1"; }
 
-log_warning() {
-    echo -e "${YELLOW}[警告]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[错误]${NC} $1"
-}
-
-# 检测系统类型
 detect_os() {
     if [ -f /etc/os-release ]; then
         . /etc/os-release
         OS=$ID
-        VER=$VERSION_ID
-    elif type lsb_release >/dev/null 2>&1; then
-        OS=$(lsb_release -si | tr '[:upper:]' '[:lower:]')
-        VER=$(lsb_release -sr)
     else
-        log_error "无法检测操作系统类型"
+        log_error "无法检测操作系统"
         exit 1
     fi
-    
-    log_info "检测到操作系统: $OS $VER"
+    log "操作系统: $OS"
 }
 
-# 安装Ubuntu/Debian依赖
 install_ubuntu_deps() {
-    log_info "更新软件包列表..."
-    sudo apt-get update
+    log "更新软件包列表..."
+    sudo apt-get update -qq
     
-    log_info "安装Nginx..."
-    sudo apt-get install -y nginx
+    log "安装系统依赖..."
+    sudo apt-get install -y nginx docker.io apache2-utils \
+        python3 python3-pip python3-venv \
+        curl wget bc net-tools >/dev/null 2>&1
     
-    log_info "安装Docker..."
-    sudo apt-get install -y docker.io docker-compose
-    sudo systemctl enable docker
-    sudo systemctl start docker
+    sudo systemctl enable docker >/dev/null 2>&1
+    sudo systemctl start docker >/dev/null 2>&1
     
-    log_info "安装Apache Bench..."
-    sudo apt-get install -y apache2-utils
-    
-    log_info "安装Python和依赖..."
-    sudo apt-get install -y python3 python3-pip python3-dev
-    sudo apt-get install -y build-essential
-    
-    log_info "安装其他工具..."
-    sudo apt-get install -y curl wget bc net-tools
-    
-    log_success "Ubuntu/Debian依赖安装完成"
+    log_success "系统依赖安装完成"
 }
 
-# 安装CentOS/RHEL依赖
 install_centos_deps() {
-    log_info "更新软件包列表..."
-    sudo yum update -y
+    log "更新软件包列表..."
+    sudo yum update -y -q
     
-    log_info "安装Nginx..."
-    sudo yum install -y nginx
+    log "安装系统依赖..."
+    sudo yum install -y nginx httpd-tools \
+        python3 python3-pip \
+        curl wget bc net-tools >/dev/null 2>&1
     
-    log_info "安装Docker..."
-    sudo yum install -y yum-utils
-    sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-    sudo yum install -y docker-ce docker-ce-cli containerd.io
-    sudo systemctl enable docker
-    sudo systemctl start docker
+    sudo yum install -y yum-utils >/dev/null 2>&1
+    sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo >/dev/null 2>&1
+    sudo yum install -y docker-ce docker-ce-cli containerd.io >/dev/null 2>&1
     
-    log_info "安装Apache Bench..."
-    sudo yum install -y httpd-tools
+    sudo systemctl enable docker >/dev/null 2>&1
+    sudo systemctl start docker >/dev/null 2>&1
     
-    log_info "安装Python和依赖..."
-    sudo yum install -y python3 python3-pip python3-devel
-    sudo yum install -y gcc gcc-c++ make
-    
-    log_info "安装其他工具..."
-    sudo yum install -y curl wget bc net-tools
-    
-    log_success "CentOS/RHEL依赖安装完成"
+    log_success "系统依赖安装完成"
 }
 
-# 安装Python依赖
 install_python_deps() {
-    log_info "安装Python依赖包..."
+    log "安装Python依赖..."
     
-    # 获取脚本所在目录（确保虚拟环境创建在正确位置）
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    VENV_DIR="${SCRIPT_DIR}/venv"
-    
-    # 检查是否是受保护的系统Python（PEP 668）
-    local use_venv=false
-    if python3 -m pip install --dry-run matplotlib 2>&1 | grep -q "externally-managed-environment"; then
-        log_warning "检测到受保护的系统Python环境（PEP 668）"
-        log_info "推荐使用虚拟环境，避免影响系统Python"
-        
-        # 默认使用虚拟环境（非交互模式）
-        use_venv=true
-    fi
-    
-    # 检查现有虚拟环境是否完整
-    if [ -d "$VENV_DIR" ]; then
-        if [ ! -f "$VENV_DIR/bin/activate" ]; then
-            log_warning "检测到损坏的虚拟环境，将重新创建..."
-            rm -rf "$VENV_DIR"
-        else
-            log_info "虚拟环境已存在: $VENV_DIR"
-        fi
-    fi
-    
-    # 创建并使用虚拟环境（推荐方式）
-    if [ "$use_venv" = true ] || [ ! -d "$VENV_DIR" ]; then
-        log_info "创建Python虚拟环境: $VENV_DIR"
-        cd "$SCRIPT_DIR"  # 确保在正确目录中创建
-        
-        # 检查是否在 WSL 中访问 Windows 文件系统（性能问题）
-        if [[ "$VENV_DIR" == /mnt/* ]]; then
-            log_warning "检测到在 WSL 中访问 Windows 文件系统，虚拟环境性能可能较差"
-            log_info "建议将项目复制到 WSL 文件系统: cp -r /mnt/c/Users/... ~/project"
-        fi
-        
+    # 创建虚拟环境
+    if [ ! -d "$VENV_DIR" ]; then
+        log "创建Python虚拟环境..."
         python3 -m venv "$VENV_DIR" || {
-            log_error "无法创建虚拟环境"
-            log_info "可能的原因:"
-            log_info "  1. 权限不足 - 尝试: sudo chown -R \$USER:\$USER $SCRIPT_DIR"
-            log_info "  2. 磁盘空间不足"
-            log_info "  3. 在 WSL 中访问 Windows 文件系统可能有兼容性问题"
-            log_info "建议: 将项目复制到 WSL 的 home 目录"
-            use_venv=false
+            log_warning "虚拟环境创建失败，将使用系统Python"
+            python3 -m pip install --user --break-system-packages matplotlib pandas seaborn numpy 2>/dev/null || \
+                python3 -m pip install --user matplotlib pandas seaborn numpy
+            log_success "Python依赖安装完成"
+            return
         }
-        
-        # 验证虚拟环境是否创建成功
-        if [ -d "$VENV_DIR" ] && [ ! -f "$VENV_DIR/bin/activate" ]; then
-            log_error "虚拟环境创建不完整，删除并重试..."
-            rm -rf "$VENV_DIR"
-            use_venv=false
-        fi
     fi
     
-    if [ "$use_venv" = true ] && [ -d "$VENV_DIR" ]; then
-        log_info "激活虚拟环境: $VENV_DIR"
-        if [ -f "$VENV_DIR/bin/activate" ]; then
-            source "$VENV_DIR/bin/activate"
-            log_success "已激活虚拟环境: $VIRTUAL_ENV"
-            pip_flags=""
-        else
-            log_error "虚拟环境目录存在但激活脚本不存在: $VENV_DIR/bin/activate"
-            log_info "尝试重新创建虚拟环境..."
-            rm -rf "$VENV_DIR"
-            python3 -m venv "$VENV_DIR" || {
-                log_error "重新创建虚拟环境失败"
-                use_venv=false
-            }
-            if [ -d "$VENV_DIR" ] && [ -f "$VENV_DIR/bin/activate" ]; then
-                source "$VENV_DIR/bin/activate"
-                log_success "已重新创建并激活虚拟环境"
-                pip_flags=""
-            else
-                use_venv=false
-            fi
-        fi
-    fi
-    
-    if [ "$use_venv" != true ] || [ -z "$VIRTUAL_ENV" ]; then
-        # 检查 pip 版本是否支持 --break-system-packages
-        pip_version=$(pip3 --version 2>/dev/null | grep -oP 'pip \K[0-9]+\.[0-9]+' | head -1 || echo "0.0")
-        pip_major=$(echo $pip_version | cut -d. -f1)
-        pip_minor=$(echo $pip_version | cut -d. -f2)
-        
-        if [ "$pip_major" -lt 23 ] || ([ "$pip_major" -eq 23 ] && [ "$pip_minor" -lt 0 ]); then
-            log_warning "pip 版本 ($pip_version) 可能不支持 --break-system-packages"
-            log_info "尝试创建虚拟环境..."
-            cd "$SCRIPT_DIR"
-            if python3 -m venv "$VENV_DIR" 2>/dev/null && [ -f "$VENV_DIR/bin/activate" ]; then
-                source "$VENV_DIR/bin/activate"
-                log_success "已创建并激活虚拟环境"
-                pip_flags=""
-            else
-                log_error "无法创建虚拟环境，且 pip 版本可能不支持 --break-system-packages"
-                log_info "请手动升级 pip: python3 -m pip install --upgrade pip"
-                log_info "或手动创建虚拟环境: cd $SCRIPT_DIR && python3 -m venv venv && source venv/bin/activate"
-                pip_flags="--break-system-packages"
-            fi
-        else
-            # 使用 --break-system-packages
-            pip_flags="--break-system-packages"
-            log_warning "使用 --break-system-packages 标志安装到系统Python"
-            log_warning "这可能会影响系统Python，建议使用虚拟环境"
-        fi
-    fi
-    
-    # 升级pip（只在虚拟环境中或使用 --break-system-packages）
-    log_info "升级pip..."
-    if [ -n "$VIRTUAL_ENV" ]; then
-        # 在虚拟环境中，不需要特殊标志
-        pip3 install --upgrade pip setuptools wheel 2>/dev/null || true
-    elif [ -n "$pip_flags" ]; then
-        # 使用 --break-system-packages
-        pip3 install $pip_flags --upgrade pip setuptools wheel 2>/dev/null || {
-            log_warning "升级 pip 失败，尝试不使用 --break-system-packages"
-            pip3 install --upgrade pip setuptools wheel --user 2>/dev/null || true
-        }
-    else
-        pip3 install --upgrade pip setuptools wheel --user 2>/dev/null || true
-    fi
+    # 激活虚拟环境
+    source "$VENV_DIR/bin/activate"
     
     # 安装依赖
-    log_info "安装Python依赖包..."
-    if [ -f "requirements.txt" ]; then
-        if [ -n "$VIRTUAL_ENV" ]; then
-            # 虚拟环境中，不需要特殊标志
-            pip3 install -r requirements.txt || {
-                log_error "安装依赖失败"
-                return 1
-            }
-        elif [ -n "$pip_flags" ]; then
-            # 使用 --break-system-packages
-            pip3 install $pip_flags -r requirements.txt || {
-                log_error "安装依赖失败，尝试使用 --user 标志"
-                pip3 install --user -r requirements.txt || {
-                    log_error "安装失败，请手动安装或使用虚拟环境"
-                    return 1
-                }
-            }
-        else
-            pip3 install --user -r requirements.txt || {
-                log_error "安装依赖失败"
-                return 1
-            }
-        fi
+    if [ -f "${SCRIPT_DIR}/requirements.txt" ]; then
+        pip install -q -r "${SCRIPT_DIR}/requirements.txt"
     else
-        if [ -n "$VIRTUAL_ENV" ]; then
-            pip3 install matplotlib pandas seaborn numpy || {
-                log_error "安装依赖失败"
-                return 1
-            }
-        elif [ -n "$pip_flags" ]; then
-            pip3 install $pip_flags matplotlib pandas seaborn numpy || {
-                log_error "安装依赖失败，尝试使用 --user 标志"
-                pip3 install --user matplotlib pandas seaborn numpy || {
-                    log_error "安装失败，请手动安装或使用虚拟环境"
-                    return 1
-                }
-            }
-        else
-            pip3 install --user matplotlib pandas seaborn numpy || {
-                log_error "安装依赖失败"
-                return 1
-            }
-        fi
+        pip install -q matplotlib pandas seaborn numpy
     fi
     
-    if [ -n "$VIRTUAL_ENV" ]; then
-        log_success "Python依赖已安装到虚拟环境: $VIRTUAL_ENV"
-        log_info "运行实验时脚本会自动激活虚拟环境"
-    else
-        log_success "Python依赖已安装到系统Python"
-    fi
-    
-    log_success "Python依赖安装完成"
+    log_success "Python依赖已安装到虚拟环境"
 }
 
-# 配置系统环境
-configure_system() {
-    log_info "配置系统环境..."
-    
-    # 确保Nginx服务可用
-    if systemctl list-unit-files | grep -q nginx.service; then
-        log_success "Nginx服务已安装"
-    else
-        log_warning "Nginx服务未正确安装"
-    fi
-    
-    # 确保Docker服务运行
-    if systemctl is-active --quiet docker; then
-        log_success "Docker服务正在运行"
-    else
-        log_info "启动Docker服务..."
-        sudo systemctl start docker
-    fi
-    
-    log_success "系统配置完成"
-}
-
-# 验证安装
 verify_installation() {
-    log_info "验证安装..."
+    log "验证安装..."
     
     local all_ok=true
-    
-    # 获取脚本所在目录
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    VENV_DIR="${SCRIPT_DIR}/venv"
-    
-    # 检查命令
     command -v nginx >/dev/null 2>&1 || { log_error "nginx未安装"; all_ok=false; }
     command -v docker >/dev/null 2>&1 || { log_error "docker未安装"; all_ok=false; }
     command -v python3 >/dev/null 2>&1 || { log_error "python3未安装"; all_ok=false; }
-    command -v ab >/dev/null 2>&1 || { log_error "ab工具未安装"; all_ok=false; }
-    
-    # 检查Python库（如果在虚拟环境中，需要激活）
-    if [ -d "$VENV_DIR" ] && [ -f "$VENV_DIR/bin/activate" ]; then
-        if [ -z "$VIRTUAL_ENV" ]; then
-            log_info "检测到虚拟环境，激活后验证..."
-            source "$VENV_DIR/bin/activate" || {
-                log_warning "无法激活虚拟环境: $VENV_DIR"
-                log_info "尝试使用系统Python验证..."
-            }
-        else
-            log_info "虚拟环境已激活: $VIRTUAL_ENV"
-        fi
-    else
-        if [ -d "$VENV_DIR" ]; then
-            log_warning "虚拟环境目录存在但激活脚本不存在: $VENV_DIR/bin/activate"
-            log_info "使用系统Python验证..."
-        else
-            log_info "未检测到虚拟环境，使用系统Python验证..."
-        fi
-    fi
+    command -v ab >/dev/null 2>&1 || { log_error "ab未安装"; all_ok=false; }
     
     # 验证Python包
-    python3 -c "import matplotlib" 2>/dev/null || { 
-        log_error "matplotlib未安装"
-        if [ -n "$VIRTUAL_ENV" ]; then
-            log_info "提示: 虚拟环境已激活，但matplotlib未安装"
-            log_info "请运行: source $VENV_DIR/bin/activate && pip3 install -r $SCRIPT_DIR/requirements.txt"
-        else
-            log_info "提示: 请安装matplotlib: pip3 install matplotlib 或使用虚拟环境"
-        fi
-        all_ok=false
-    }
+    if [ -d "$VENV_DIR" ]; then
+        source "$VENV_DIR/bin/activate"
+    fi
+    
+    python3 -c "import matplotlib" 2>/dev/null || { log_error "matplotlib未安装"; all_ok=false; }
     python3 -c "import pandas" 2>/dev/null || { log_error "pandas未安装"; all_ok=false; }
-    python3 -c "import seaborn" 2>/dev/null || { 
-        log_error "seaborn未安装"
-        if [ -n "$VIRTUAL_ENV" ]; then
-            log_info "提示: 虚拟环境已激活，但seaborn未安装"
-            log_info "请运行: source $VENV_DIR/bin/activate && pip3 install -r $SCRIPT_DIR/requirements.txt"
-        fi
-        all_ok=false
-    }
     
     if [ "$all_ok" = true ]; then
-        log_success "所有依赖验证通过！"
-        if [ -n "$VIRTUAL_ENV" ]; then
-            log_info "Python环境: 虚拟环境 ($VIRTUAL_ENV)"
-        else
-            log_info "Python环境: 系统Python"
-        fi
+        log_success "所有依赖验证通过"
         return 0
     else
-        log_error "部分依赖未正确安装，请检查上述错误"
-        log_info ""
-        log_info "手动修复建议:"
-        if [ -d "$VENV_DIR" ]; then
-            log_info "1. 激活虚拟环境: source $VENV_DIR/bin/activate"
-            log_info "2. 安装依赖: pip3 install -r $SCRIPT_DIR/requirements.txt"
-        else
-            log_info "1. 创建虚拟环境: cd $SCRIPT_DIR && python3 -m venv venv"
-            log_info "2. 激活虚拟环境: source venv/bin/activate"
-            log_info "3. 安装依赖: pip3 install -r requirements.txt"
-        fi
+        log_error "部分依赖未正确安装"
         return 1
     fi
 }
 
-# 主函数
 main() {
-    log_info "=========================================="
-    log_info "实验依赖安装脚本"
-    log_info "=========================================="
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  实验依赖安装"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
     
-    # 检查是否为root
-    if [ "$EUID" -ne 0 ]; then 
-        log_info "需要sudo权限，将提示输入密码"
-    fi
-    
-    # 检测操作系统
     detect_os
     
-    # 根据系统类型安装依赖
     case $OS in
         ubuntu|debian)
             install_ubuntu_deps
@@ -412,29 +142,24 @@ main() {
             ;;
         *)
             log_error "不支持的操作系统: $OS"
-            log_info "请手动安装依赖，参考 实验说明.md"
             exit 1
             ;;
     esac
     
-    # 安装Python依赖
     install_python_deps
     
-    # 配置系统环境
-    configure_system
-    
-    # 验证安装
     if verify_installation; then
-        log_success "=========================================="
-        log_success "依赖安装完成！"
-        log_success "=========================================="
-        log_info "现在可以运行实验: sudo ./run_experiment.sh"
+        echo ""
+        log_success "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        log_success "  依赖安装完成！"
+        log_success "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        log "现在可以运行实验: bash run_experiment.sh"
+        echo ""
     else
-        log_error "安装完成，但部分依赖验证失败"
-        log_info "请检查错误信息并手动修复"
+        log_error "安装完成但验证失败，请检查错误信息"
         exit 1
     fi
 }
 
 main "$@"
-
