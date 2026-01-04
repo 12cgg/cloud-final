@@ -37,17 +37,17 @@ wheels/
 *.spec
 
 # 实验结果数据（运行时产生）
-# results/
-# *.csv
+results/
+*.csv
 *.txt
-# *.log
+*.log
 
 # 图表和可视化输出
-# *.png
-# *.jpg
-# *.jpeg
-# *.pdf
-# *.svg
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.svg
 
 # 备份文件
 *.bak
