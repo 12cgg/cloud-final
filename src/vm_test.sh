@@ -184,9 +184,13 @@ BOOT_TIME=0
 if command -v systemd-analyze >/dev/null 2>&1; then
     # 提取总启动时间（例如：Startup finished in 2.123s (kernel) + 15.432s (userspace) = 17.555s）
     BOOT_TIME=$(systemd-analyze | grep -oP "finished in .* = \K[0-9.]+(?=s)" || echo 0)
-    if [[ "${BOOT_TIME}" == "0" ]]; then
+    if [[ "${BOOT_TIME}" == "0" ]] || [[ -z "${BOOT_TIME}" ]]; then
         # 兼容不同版本的 systemd-analyze 输出格式
         BOOT_TIME=$(systemd-analyze | awk -F'=' '/Startup finished/ {print $2}' | awk '{print $1}' | sed 's/s//' || echo 0)
+    fi
+    # 确保BOOT_TIME不为空
+    if [[ -z "${BOOT_TIME}" ]] || [[ "${BOOT_TIME}" == "" ]]; then
+        BOOT_TIME=0
     fi
     log "系统引导时间: ${BOOT_TIME}秒"
 else

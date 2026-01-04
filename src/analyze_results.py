@@ -17,10 +17,31 @@ def generate_report(perf_csv: str, stress_csv: str, output_file: str, charts_dir
     perf_df = pd.read_csv(perf_csv)
     stress_df = pd.read_csv(stress_csv)
     
-    vm_perf = perf_df[perf_df['platform'] == 'vm'].iloc[0]
-    docker_perf = perf_df[perf_df['platform'] == 'docker'].iloc[0]
-    vm_stress = stress_df[stress_df['platform'] == 'vm'].iloc[0]
-    docker_stress = stress_df[stress_df['platform'] == 'docker'].iloc[0]
+    # 验证数据完整性
+    if perf_df.empty:
+        raise ValueError("性能数据文件为空")
+    if stress_df.empty:
+        raise ValueError("压测数据文件为空")
+    
+    # 检查是否包含所需平台的数据
+    vm_perf_data = perf_df[perf_df['platform'] == 'vm']
+    docker_perf_data = perf_df[perf_df['platform'] == 'docker']
+    vm_stress_data = stress_df[stress_df['platform'] == 'vm']
+    docker_stress_data = stress_df[stress_df['platform'] == 'docker']
+    
+    if vm_perf_data.empty:
+        raise ValueError("缺少VM性能数据")
+    if docker_perf_data.empty:
+        raise ValueError("缺少Docker性能数据")
+    if vm_stress_data.empty:
+        raise ValueError("缺少VM压测数据")
+    if docker_stress_data.empty:
+        raise ValueError("缺少Docker压测数据")
+    
+    vm_perf = vm_perf_data.iloc[0]
+    docker_perf = docker_perf_data.iloc[0]
+    vm_stress = vm_stress_data.iloc[0]
+    docker_stress = docker_stress_data.iloc[0]
     
     report = []
     
